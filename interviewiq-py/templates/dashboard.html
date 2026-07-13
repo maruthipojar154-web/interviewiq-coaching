@@ -1,0 +1,79 @@
+{% extends "_base.html" %}
+{% block title %}Dashboard — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("dashboard");
+  if (!ctx) return;
+  const { profile, projects } = ctx;
+
+  let sessions = [];
+  try {
+    const res = await api.get("/analytics");
+    sessions = res.sessions;
+  } catch (e) {
+    console.error("Failed to load sessions:", e);
+  }
+
+  const skills = (profile && profile.skills) || [];
+  const avg = sessions.length
+    ? Math.round(sessions.reduce((a, b) => a + b.avg_score, 0) / sessions.length)
+    : null;
+  const hasResume = Boolean(profile && (profile.resume_text || profile.resume_path));
+  const completion = computeCompletion(Auth.getUser(), profile, projects);
+
+  const html = `
+    <div class="page-hdr">
+      <div class="page-title">Dashboard 👋</div>
+      <div class="page-sub">Your interview prep at a glance</div>
+    </div>
+    <div class="divider"></div>
+    <div class="content">
+      <div class="dash-grid">
+        <div class="dash-stat"><div class="dash-emoji">📄</div><div class="dash-val" style="color:${hasResume ? "#34D399" : "#454B6A"}">${hasResume ? "✓" : "–"}</div><div class="dash-key">Resume</div></div>
+        <div class="dash-stat"><div class="dash-emoji">🛠️</div><div class="dash-val" style="color:#6366F1">${projects.length}</div><div class="dash-key">Projects</div></div>
+        <div class="dash-stat"><div class="dash-emoji">⚡</div><div class="dash-val" style="color:#FBBF24">${skills.length}</div><div class="dash-key">Skills</div></div>
+        <div class="dash-stat"><div class="dash-emoji">📊</div><div class="dash-val" style="color:${avg >= 7 ? "#34D399" : avg ? "#FBBF24" : "#454B6A"}">${avg ? `${avg}/10` : "–"}</div><div class="dash-key">Avg Score</div></div>
+      </div>
+
+      <div class="section-lbl">Profile Completion</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;margin-bottom:7px">
+          <span style="font-size:13px;font-weight:600">Setup Progress</span>
+          <span style="font-size:14px;font-weight:700;color:${completion === 100 ? "#34D399" : "#6366F1"}">${completion}%</span>
+        </div>
+        <div class="prog-bar"><div class="prog-fill" style="width:${completion}%;background:${completion === 100 ? "#34D399" : "#6366F1"}"></div></div>
+        ${completion < 100 ? `
+        <div class="comp-tags">
+          ${!profile || !profile.role ? `<span class="comp-tag" style="background:rgba(248,113,113,.1);color:#F87171">Add target role</span>` : ""}
+          ${!hasResume ? `<span class="comp-tag" style="background:rgba(251,191,36,.1);color:#FBBF24">Upload resume</span>` : ""}
+          ${projects.length === 0 ? `<span class="comp-tag" style="background:rgba(99,102,241,.1);color:#818CF8">Add a project</span>` : ""}
+        </div>` : ""}
+      </div>
+
+      <div class="section-lbl">Quick Actions</div>
+      <div class="quick-grid">
+        <div class="quick-card" onclick="window.location.href='/chatbot'">
+          <div class="qc-icon">🎤</div><div class="qc-title">Start Mock Interview</div><div class="qc-sub">Practice with your AI coach</div>
+        </div>
+        <div class="quick-card" onclick="window.location.href='/profile'">
+          <div class="qc-icon">👤</div><div class="qc-title">Edit Profile</div><div class="qc-sub">Keep your info up to date</div>
+        </div>
+        <div class="quick-card" onclick="window.location.href='/projects'">
+          <div class="qc-icon">🛠️</div><div class="qc-title">Manage Projects</div><div class="qc-sub">Add deep-dive material</div>
+        </div>
+        <div class="quick-card" onclick="window.location.href='/analytics'">
+          <div class="qc-icon">📊</div><div class="qc-title">View Analytics</div><div class="qc-sub">Track your progress</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById("pageContent").innerHTML = html;
+})();
+</script>
+{% endblock %}

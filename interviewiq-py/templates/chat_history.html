@@ -1,0 +1,134 @@
+{% extends "_base.html" %}
+{% block title %}Chat History — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("chat-history");
+  if (!ctx) return;
+
+  document.getElementById("pageContent").innerHTML = `
+    <div class="page-hdr">
+      <div class="page-title">Chat History 🕐</div>
+      <div class="page-sub">All your past AI coaching conversations</div>
+    </div>
+    <div class="divider"></div>
+    <div class="content">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-p" onclick="window.location.href='/chatbot'" style="font-size:12px;padding:7px 14px">💬 New Text Chat</button>
+        <button class="btn btn-p" onclick="window.location.href='/voice-bot'" style="font-size:12px;padding:7px 14px">🎙️ New Voice Chat</button>
+      </div>
+      <div id="sessionsList"><div style="color:var(--muted);font-size:13px">Loading...</div></div>
+      <div id="messagesPanel" style="display:none;margin-top:20px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <button class="btn btn-g" onclick="backToList()" style="font-size:12px;padding:6px 12px">← Back</button>
+          <div id="sessionTitle" style="font-size:15px;font-weight:700"></div>
+          <button class="btn btn-d" id="deleteBtn" style="font-size:12px;padding:6px 12px;margin-left:auto">🗑 Delete</button>
+        </div>
+        <div id="messagesList" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+    </div>
+  `;
+
+  let sessions = [];
+  let currentSessionId = null;
+
+  async function loadSessions() {
+    try {
+      const res = await api.get("/chat-history/sessions");
+      sessions = res.sessions || [];
+      renderSessions();
+    } catch (e) {
+      document.getElementById("sessionsList").innerHTML =
+        `<div class="empty-state"><div class="empty-icon">💬</div><div class="empty-text">Couldn't load history. Please try again.</div></div>`;
+    }
+  }
+
+  function renderSessions() {
+    const el = document.getElementById("sessionsList");
+    if (!sessions.length) {
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">🕐</div><div class="empty-text">No chat history yet. Start a conversation in Text Chat or Voice Bot.</div></div>`;
+      return;
+    }
+    el.innerHTML = sessions.map(s => `
+      <div class="card" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:14px 18px"
+           onclick="openSession('${s.id}')">
+        <div style="font-size:22px">💬</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.title || "Untitled")}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${new Date(s.updated_at).toLocaleString()}</div>
+        </div>
+        <div style="font-size:18px;color:var(--muted)">›</div>
+      </div>
+    `).join("");
+  }
+
+  async function openSession(id) {
+    currentSessionId = id;
+    try {
+      const res = await api.get(`/chat-history/sessions/${id}`);
+      const session = res.session;
+      const messages = res.messages || [];
+
+      document.getElementById("sessionsList").style.display = "none";
+      document.getElementById("messagesPanel").style.display = "block";
+      document.getElementById("sessionTitle").textContent = session.title || "Conversation";
+
+      const ml = document.getElementById("messagesList");
+      if (!messages.length) {
+        ml.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No messages in this conversation.</div>`;
+        return;
+      }
+      ml.innerHTML = messages.map(m => `
+        <div style="display:flex;gap:10px;align-items:flex-start;${m.role==="user"?"flex-direction:row-reverse":""}">
+          <div style="width:30px;height:30px;border-radius:8px;background:${m.role==="user"?"var(--card)":"linear-gradient(135deg,#6366F1,#8B5CF6)"};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;border:1px solid var(--border)">
+            ${m.role === "user" ? "👤" : "🤖"}
+          </div>
+          <div style="max-width:75%;background:${m.role==="user"?"#6366F1":"var(--surface)"};color:${m.role==="user"?"white":"var(--text)"};padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.6;border:1px solid ${m.role==="user"?"transparent":"var(--border)"}">
+            ${escapeHtml(m.content)}
+            <div style="font-size:10px;opacity:.6;margin-top:4px">${new Date(m.created_at).toLocaleTimeString()}</div>
+          </div>
+        </div>
+      `).join("");
+
+      document.getElementById("deleteBtn").onclick = () => deleteSession(id);
+    } catch (e) {
+      showToast("Couldn't load conversation.", "error");
+    }
+  }
+
+  async function deleteSession(id) {
+    if (!confirm("Delete this conversation?")) return;
+    try {
+      await api.del(`/chat-history/sessions/${id}`);
+      showToast("Conversation deleted.");
+      sessions = sessions.filter(s => s.id !== id);
+      backToList();
+    } catch (e) {
+      showToast("Couldn't delete.", "error");
+    }
+  }
+
+  window.backToList = () => {
+    currentSessionId = null;
+    document.getElementById("sessionsList").style.display = "block";
+    document.getElementById("messagesPanel").style.display = "none";
+  };
+
+  window.openSession = openSession;
+  window.deleteSession = deleteSession;
+
+  function escapeHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str == null ? "" : String(str);
+    return d.innerHTML;
+  }
+
+  loadSessions();
+})();
+</script>
+{% endblock %}

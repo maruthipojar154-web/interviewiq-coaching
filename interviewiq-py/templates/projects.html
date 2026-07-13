@@ -1,0 +1,115 @@
+{% extends "_base.html" %}
+{% block title %}My Projects — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("projects");
+  if (!ctx) return;
+  let projects = ctx.projects || [];
+
+  const html = `
+    <div class="page-hdr"><div class="page-title">My Projects</div><div class="page-sub">The AI asks deep-dive questions about these</div></div>
+    <div class="divider"></div>
+    <div class="content">
+      <div id="projectsList"></div>
+      <button class="add-proj" id="addProjBtn">+ Add another project</button>
+    </div>
+  `;
+  document.getElementById("pageContent").innerHTML = html;
+
+  function renderProjects() {
+    const list = document.getElementById("projectsList");
+    if (projects.length === 0) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon">🛠️</div><div class="empty-text">No projects yet. Add one to get started.</div></div>`;
+      return;
+    }
+    list.innerHTML = projects.map((p, i) => `
+      <div class="proj-card" data-id="${p.id}">
+        <div class="proj-hdr">
+          <div class="proj-num">${i + 1}</div>
+          <input class="proj-name-inp" placeholder="Project name" value="${escapeHtml(p.name || "")}" data-field="name" />
+          <button class="proj-rm" data-action="delete" data-id="${p.id}">×</button>
+        </div>
+        <div style="display:flex;gap:14px;margin-bottom:11px">
+          <label class="proj-photo-lbl">
+            ${p.photo_path ? `<img src="${p.photo_path}" alt="" />` : `<div class="proj-photo-ph"><span style="font-size:18px">🖼️</span>Photo</div>`}
+            <input type="file" accept="image/*" style="display:none" data-action="photo" data-id="${p.id}" />
+          </label>
+          <div style="flex:1">
+            <div class="field"><label class="field-lbl">Tech Stack</label><input class="fi" placeholder="React, Node.js, MySQL..." value="${escapeHtml(p.stack || "")}" data-field="stack" /></div>
+          </div>
+        </div>
+        <div class="field"><label class="field-lbl">Description</label><textarea class="fi" rows="2" placeholder="What does this project do?" data-field="description">${escapeHtml(p.description || "")}</textarea></div>
+        <div class="field"><label class="field-lbl">Key Highlights</label><textarea class="fi" rows="2" placeholder="Your specific contributions, challenges solved..." data-field="highlights">${escapeHtml(p.highlights || "")}</textarea></div>
+        <div class="btn-row" style="margin-top:11px">
+          <button class="btn btn-p" data-action="save" data-id="${p.id}" style="padding:7px 16px;font-size:12px">Save</button>
+        </div>
+      </div>
+    `).join("");
+
+    list.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api.del(`/projects/${btn.dataset.id}`);
+          projects = projects.filter((p) => p.id != btn.dataset.id);
+          renderProjects();
+          showToast("Project removed.");
+        } catch (err) {
+          showToast((err.data && err.data.message) || "Couldn't remove project.", "error");
+        }
+      });
+    });
+
+    list.querySelectorAll('[data-action="save"]').forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".proj-card");
+        const data = {};
+        card.querySelectorAll("[data-field]").forEach((el) => { data[el.dataset.field] = el.value; });
+        try {
+          await api.put(`/projects/${btn.dataset.id}`, data);
+          const idx = projects.findIndex((p) => p.id == btn.dataset.id);
+          if (idx > -1) projects[idx] = { ...projects[idx], ...data };
+          showToast("Project saved!");
+        } catch (err) {
+          showToast((err.data && err.data.message) || "Couldn't save project.", "error");
+        }
+      });
+    });
+
+    list.querySelectorAll('[data-action="photo"]').forEach((input) => {
+      input.addEventListener("change", async () => {
+        const file = input.files[0];
+        if (!file) return;
+        try {
+          const fd = new FormData();
+          fd.append("photo", file);
+          const res = await api.post(`/projects/${input.dataset.id}/photo`, fd, { isFormData: true });
+          const idx = projects.findIndex((p) => p.id == input.dataset.id);
+          if (idx > -1) projects[idx].photo_path = res.photo_path;
+          renderProjects();
+          showToast("Project photo updated!");
+        } catch (err) {
+          showToast((err.data && err.data.message) || "Couldn't upload photo.", "error");
+        }
+      });
+    });
+  }
+  renderProjects();
+
+  document.getElementById("addProjBtn").addEventListener("click", async () => {
+    try {
+      const res = await api.post("/projects", { name: "", stack: "", description: "", highlights: "" });
+      projects.push({ id: res.id, name: "", stack: "", description: "", highlights: "", photo_path: null });
+      renderProjects();
+    } catch (err) {
+      showToast((err.data && err.data.message) || "Couldn't add project.", "error");
+    }
+  });
+})();
+</script>
+{% endblock %}

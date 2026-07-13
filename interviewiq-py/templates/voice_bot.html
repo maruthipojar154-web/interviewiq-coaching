@@ -1,0 +1,385 @@
+{% extends "_base.html" %}
+{% block title %}Voice AI Bot — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("voice-bot");
+  if (!ctx) return;
+  const { user, profile, projects } = ctx;
+
+  document.getElementById("pageContent").innerHTML = `
+    <div style="display:flex;flex-direction:column;height:calc(100vh - 50px);background:var(--bg)">
+
+      <!-- Top bar -->
+      <div style="padding:14px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface)">
+        <div style="width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#6366F1,#8B5CF6);display:flex;align-items:center;justify-content:center;font-size:18px">🤖</div>
+        <div>
+          <div style="font-size:14px;font-weight:700">InterviewBot Voice</div>
+          <div style="font-size:11px;color:var(--mutedLight)" id="statusLabel">Click the mic to start talking</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--mutedLight);display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="autoSpeakToggle" checked style="accent-color:#6366F1" /> Auto-speak replies
+          </label>
+          <button class="btn btn-g" onclick="window.location.href='/chatbot'" style="font-size:12px;padding:6px 12px">💬 Text Chat</button>
+          <button class="btn btn-g" onclick="window.location.href='/chat-history'" style="font-size:12px;padding:6px 12px">🕐 History</button>
+        </div>
+      </div>
+
+      <!-- Main voice area -->
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:28px;overflow:hidden">
+
+        <!-- Animated avatar -->
+        <div style="position:relative">
+          <div id="avatarRing" style="width:160px;height:160px;border-radius:50%;background:linear-gradient(135deg,#6366F1,#8B5CF6);display:flex;align-items:center;justify-content:center;font-size:64px;transition:all .3s;box-shadow:0 0 0 0 rgba(99,102,241,0.4)">
+            🤖
+          </div>
+          <div id="listeningRing" style="position:absolute;inset:-8px;border-radius:50%;border:3px solid #6366F1;opacity:0;transition:opacity .3s"></div>
+          <div id="speakingDots" style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);display:none;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 10px">
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#6366F1;animation:td .6s infinite"></span>
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#6366F1;animation:td .6s .1s infinite"></span>
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#6366F1;animation:td .6s .2s infinite"></span>
+          </div>
+        </div>
+
+        <!-- Transcript bubble -->
+        <div id="transcriptBubble" style="max-width:520px;width:100%;min-height:60px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px 18px;font-size:15px;text-align:center;color:var(--mutedLight);line-height:1.6;transition:all .2s">
+          Say something to start your AI interview coach session...
+        </div>
+
+        <!-- AI response bubble -->
+        <div id="responseBubble" style="max-width:520px;width:100%;min-height:60px;background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(139,92,246,.08));border:1px solid rgba(99,102,241,.2);border-radius:16px;padding:14px 18px;font-size:15px;text-align:center;color:var(--text);line-height:1.6;display:none">
+        </div>
+
+        <!-- Waveform visualizer -->
+        <div id="waveform" style="display:flex;align-items:center;gap:3px;height:40px;opacity:0;transition:opacity .3s">
+          ${Array(20).fill(0).map((_,i) => `<div class="wave-bar" style="width:4px;background:#6366F1;border-radius:2px;height:8px;animation:wave 1s ${i*0.05}s infinite ease-in-out alternate"></div>`).join("")}
+        </div>
+
+        <!-- Controls -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+          <button id="micBtn" style="width:80px;height:80px;border-radius:50%;border:none;cursor:pointer;font-size:32px;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;transition:all .2s;box-shadow:0 8px 24px rgba(99,102,241,.4)">
+            🎙️
+          </button>
+          <div id="micLabel" style="font-size:13px;color:var(--mutedLight)">Click to speak</div>
+
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <button id="stopSpeakBtn" class="btn btn-g" style="font-size:12px;padding:7px 14px;display:none">⏹ Stop Speaking</button>
+            <button id="clearBtn" class="btn btn-g" style="font-size:12px;padding:7px 14px">🗑 Clear</button>
+            <button id="saveHistBtn" class="btn btn-g" style="font-size:12px;padding:7px 14px">💾 Save Chat</button>
+          </div>
+        </div>
+
+        <!-- Quick voice chips -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:560px">
+          ${["Start interview 🎤","Tell me about yourself","Technical question","My biggest strength","HR question","Project explanation"].map(c =>
+            `<button class="chip" onclick="sendVoiceText('${c}')" style="font-size:12px">${c}</button>`
+          ).join("")}
+        </div>
+      </div>
+
+      <!-- Conversation log (collapsed, expandable) -->
+      <div style="border-top:1px solid var(--border);background:var(--surface)">
+        <div id="logToggle" onclick="toggleLog()" style="padding:10px 20px;cursor:pointer;font-size:12px;color:var(--mutedLight);display:flex;align-items:center;justify-content:space-between">
+          <span>Conversation Log</span>
+          <span id="logArrow">▲</span>
+        </div>
+        <div id="logPanel" style="max-height:180px;overflow-y:auto;padding:0 20px 12px;display:none">
+          <div id="logContent" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      @keyframes wave { from{height:6px} to{height:32px} }
+      @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(99,102,241,.5)} 100%{box-shadow:0 0 0 20px rgba(99,102,241,0)} }
+      .listening-pulse { animation: pulse-ring 1s infinite !important; }
+    </style>
+  `;
+
+  // ---- State ----
+  let isListening = false;
+  let isSpeaking = false;
+  let autoSpeak = true;
+  let chatHistory = [];
+  let sessionId = null;
+  let currentUtterance = null;
+  let recognition = null;
+  let finalTranscript = "";
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const synth = window.speechSynthesis;
+
+  // ---- Greet user on load ----
+  setTimeout(() => {
+    const greeting = `Hi ${user.name ? user.name.split(" ")[0] : "there"}! I'm your AI interview coach. Click the mic or say "start interview" to begin practicing.`;
+    updateResponse(greeting);
+    if (autoSpeak) speak(greeting);
+  }, 800);
+
+  // ---- Speech Recognition ----
+  if (!SR) {
+    document.getElementById("statusLabel").textContent = "Voice not supported in this browser. Use Chrome or Edge.";
+    document.getElementById("micBtn").disabled = true;
+    document.getElementById("micBtn").style.opacity = "0.4";
+  } else {
+    recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-IN";
+
+    recognition.onstart = () => {
+      isListening = true;
+      finalTranscript = "";
+      setListeningUI(true);
+    };
+
+    recognition.onresult = (e) => {
+      let interim = "";
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      finalTranscript += final;
+      document.getElementById("transcriptBubble").textContent = finalTranscript || interim || "Listening...";
+      document.getElementById("transcriptBubble").style.color = "var(--text)";
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      setListeningUI(false);
+      if (finalTranscript.trim()) {
+        sendVoiceText(finalTranscript.trim());
+      }
+    };
+
+    recognition.onerror = (e) => {
+      isListening = false;
+      setListeningUI(false);
+      if (e.error !== "no-speech") {
+        document.getElementById("transcriptBubble").textContent = "Couldn't hear you. Try again.";
+      }
+    };
+  }
+
+  // ---- Mic button ----
+  document.getElementById("micBtn").addEventListener("click", () => {
+    if (isSpeaking) { stopSpeaking(); return; }
+    if (!recognition) return;
+    if (isListening) {
+      recognition.stop();
+    } else {
+      if (synth.speaking) stopSpeaking();
+      recognition.start();
+    }
+  });
+
+  document.getElementById("stopSpeakBtn").addEventListener("click", stopSpeaking);
+  document.getElementById("autoSpeakToggle").addEventListener("change", (e) => {
+    autoSpeak = e.target.checked;
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    chatHistory = [];
+    document.getElementById("logContent").innerHTML = "";
+    document.getElementById("transcriptBubble").textContent = "Conversation cleared. Say something to start again.";
+    document.getElementById("transcriptBubble").style.color = "var(--mutedLight)";
+    document.getElementById("responseBubble").style.display = "none";
+  });
+  document.getElementById("saveHistBtn").addEventListener("click", saveChat);
+
+  // ---- Send text to AI ----
+  async function sendVoiceText(text) {
+    if (!text.trim()) return;
+    if (isSpeaking) stopSpeaking();
+
+    // Add to history
+    chatHistory.push({ role: "user", content: text });
+    addToLog("user", text);
+    document.getElementById("transcriptBubble").textContent = text;
+    document.getElementById("transcriptBubble").style.color = "var(--text)";
+
+    setThinkingUI(true);
+
+    try {
+      const res = await api.post("/chat", {
+        messages: chatHistory,
+        session_id: sessionId,
+        voice: true,
+      });
+      const reply = res.reply;
+      chatHistory.push({ role: "assistant", content: reply });
+      addToLog("assistant", reply);
+      updateResponse(reply);
+      if (autoSpeak) speak(reply);
+    } catch (err) {
+      const msg = (err.data && err.data.message) || "Something went wrong. Please try again.";
+      updateResponse(msg);
+      if (autoSpeak) speak(msg);
+    }
+    setThinkingUI(false);
+  }
+
+  // Make globally available for chip buttons
+  window.sendVoiceText = sendVoiceText;
+
+  // ---- Text-to-Speech ----
+  function speak(text) {
+    if (!synth) return;
+    if (synth.speaking) synth.cancel();
+    // Strip markdown symbols for cleaner speech
+    const clean = text.replace(/\*\*/g,"").replace(/\*/g,"").replace(/#+/g,"").replace(/\[.*?\]/g,"");
+    currentUtterance = new SpeechSynthesisUtterance(clean);
+    currentUtterance.lang = "en-IN";
+    currentUtterance.rate = 0.95;
+    currentUtterance.pitch = 1.05;
+    currentUtterance.volume = 1;
+
+    // Pick best voice
+    const voices = synth.getVoices();
+    const preferred = voices.find(v =>
+      v.lang.startsWith("en") && (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha"))
+    ) || voices.find(v => v.lang.startsWith("en")) || voices[0];
+    if (preferred) currentUtterance.voice = preferred;
+
+    currentUtterance.onstart = () => { isSpeaking = true; setSpeakingUI(true); };
+    currentUtterance.onend = () => { isSpeaking = false; setSpeakingUI(false); };
+    currentUtterance.onerror = () => { isSpeaking = false; setSpeakingUI(false); };
+    synth.speak(currentUtterance);
+  }
+
+  function stopSpeaking() {
+    if (synth && synth.speaking) synth.cancel();
+    isSpeaking = false;
+    setSpeakingUI(false);
+  }
+
+  // ---- Save to DB ----
+  async function saveChat() {
+    if (chatHistory.length === 0) {
+      showToast("No conversation to save.", "error");
+      return;
+    }
+    try {
+      if (!sessionId) {
+        const res = await api.post("/chat-history/sessions", { title: "Voice Chat" });
+        sessionId = res.session_id;
+      }
+      // Save all messages
+      for (const msg of chatHistory) {
+        await api.post("/chat", {
+          messages: [{ role: "user", content: "save" }],
+          session_id: sessionId,
+          voice: false,
+        });
+      }
+      showToast("Chat saved to history!");
+    } catch (err) {
+      showToast("Couldn't save chat.", "error");
+    }
+  }
+
+  // ---- UI helpers ----
+  function setListeningUI(listening) {
+    const btn = document.getElementById("micBtn");
+    const label = document.getElementById("micLabel");
+    const status = document.getElementById("statusLabel");
+    const ring = document.getElementById("listeningRing");
+    const waveform = document.getElementById("waveform");
+    const avatar = document.getElementById("avatarRing");
+
+    if (listening) {
+      btn.textContent = "⏹";
+      btn.style.background = "linear-gradient(135deg,#F87171,#EF4444)";
+      btn.style.boxShadow = "0 8px 24px rgba(248,113,113,.5)";
+      label.textContent = "Listening... click to stop";
+      status.textContent = "🔴 Listening to you...";
+      ring.style.opacity = "1";
+      waveform.style.opacity = "1";
+      avatar.classList.add("listening-pulse");
+      document.getElementById("transcriptBubble").textContent = "Listening...";
+      document.getElementById("transcriptBubble").style.color = "var(--mutedLight)";
+    } else {
+      btn.textContent = "🎙️";
+      btn.style.background = "linear-gradient(135deg,#6366F1,#8B5CF6)";
+      btn.style.boxShadow = "0 8px 24px rgba(99,102,241,.4)";
+      label.textContent = "Click to speak";
+      status.textContent = "Click the mic to start talking";
+      ring.style.opacity = "0";
+      waveform.style.opacity = "0";
+      avatar.classList.remove("listening-pulse");
+    }
+  }
+
+  function setSpeakingUI(speaking) {
+    const dots = document.getElementById("speakingDots");
+    const btn = document.getElementById("stopSpeakBtn");
+    const status = document.getElementById("statusLabel");
+    if (speaking) {
+      dots.style.display = "flex";
+      btn.style.display = "inline-flex";
+      status.textContent = "🔊 Speaking... click Stop to interrupt";
+    } else {
+      dots.style.display = "none";
+      btn.style.display = "none";
+      status.textContent = "Click the mic to start talking";
+    }
+  }
+
+  function setThinkingUI(thinking) {
+    const status = document.getElementById("statusLabel");
+    const resp = document.getElementById("responseBubble");
+    if (thinking) {
+      status.textContent = "🤔 Thinking...";
+      resp.style.display = "block";
+      resp.innerHTML = `<span style="color:var(--mutedLight)">InterviewBot is thinking...</span>`;
+    } else {
+      status.textContent = "Click the mic to start talking";
+    }
+  }
+
+  function updateResponse(text) {
+    const el = document.getElementById("responseBubble");
+    el.style.display = "block";
+    el.textContent = text;
+  }
+
+  function addToLog(role, text) {
+    const log = document.getElementById("logContent");
+    const div = document.createElement("div");
+    div.style.cssText = `display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)`;
+    div.innerHTML = `
+      <span style="font-size:11px;font-weight:700;color:${role==="user"?"#818CF8":"#34D399"};min-width:60px;flex-shrink:0">
+        ${role === "user" ? "You" : "Bot"}
+      </span>
+      <span style="font-size:12px;color:var(--text);line-height:1.5">${text}</span>
+    `;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+
+    // Show log panel when there's content
+    if (document.getElementById("logPanel").style.display === "none") {
+      // Keep collapsed, just update badge
+    }
+  }
+
+  let logOpen = false;
+  window.toggleLog = () => {
+    logOpen = !logOpen;
+    document.getElementById("logPanel").style.display = logOpen ? "block" : "none";
+    document.getElementById("logArrow").textContent = logOpen ? "▼" : "▲";
+  };
+
+  // Load voices (some browsers need this trigger)
+  if (synth) {
+    synth.getVoices();
+    synth.addEventListener("voiceschanged", () => synth.getVoices());
+  }
+})();
+</script>
+{% endblock %}

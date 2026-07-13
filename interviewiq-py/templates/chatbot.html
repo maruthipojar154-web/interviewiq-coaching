@@ -1,0 +1,288 @@
+{% extends "_base.html" %}
+{% block title %}Chat with AI — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("chatbot");
+  if (!ctx) return;
+  const { user, profile, projects } = ctx;
+  const skills = (profile && profile.skills) || [];
+  const resumeLoaded = Boolean(profile && (profile.resume_text || profile.resume_path));
+  const photoUrl = profile && profile.photo_path ? profile.photo_path : null;
+
+  const storageKey = "iq_chat_" + user.id;
+  let msgs = [];
+  let chatStarted = false;
+  let histRef = [];
+  let sessionScores = [];
+  let sessionCats = { Technical: [], Project: [], Behavioral: [], HR: [] };
+
+  const CHIPS = [
+    "Start mock interview \uD83C\uDFA4",
+    "How do I explain my main project?",
+    "Ask me a technical question",
+    "Coach me on 'tell me about yourself'",
+    "Give me a hard technical question",
+    "What weakness should I admit?"
+  ];
+
+  document.getElementById("pageContent").innerHTML = `
+    <div class="chat-layout">
+      <div class="chat-hdr">
+        <div class="chat-bot-av">\uD83E\uDD16</div>
+        <div>
+          <div class="chat-bot-name">InterviewBot</div>
+          <div class="chat-bot-sub" id="botSub"></div>
+        </div>
+        <button class="btn btn-g" id="saveSessionBtn" style="margin-left:auto;font-size:12px;padding:6px 12px;display:none">Save Session</button>
+        <div class="ch-online"></div>
+      </div>
+      <div class="chat-msgs" id="chatMsgs"></div>
+      <div class="chips" id="chipsRow"></div>
+      <div class="voice-bar" id="voiceBar" style="display:none">
+        <button class="mic-btn idle" id="micBtn">🎙️</button>
+        <div class="voice-status" id="voiceStatus">Press 🎙️ to speak your answer</div>
+        <button class="btn btn-p" id="voiceSendBtn" style="padding:6px 12px;font-size:12px;display:none">Send</button>
+      </div>
+      <div class="chat-inp-row">
+        <div class="chat-inp-wrap">
+          <textarea class="chat-ta" id="chatInput" rows="1" placeholder="Type or use the mic above to speak your answer..."></textarea>
+          <button class="send-btn" id="sendBtn" disabled>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("botSub").textContent =
+    "Coaching " + (user.name || "") + " \u00B7 " + skills.length + " skills \u00B7 " + projects.length + " projects" + (resumeLoaded ? " \u00B7 Resume \u2713" : "");
+
+  const chatMsgs   = document.getElementById("chatMsgs");
+  const chipsRow   = document.getElementById("chipsRow");
+  const chatInput  = document.getElementById("chatInput");
+  const sendBtn    = document.getElementById("sendBtn");
+  const savBtn     = document.getElementById("saveSessionBtn");
+  let chatLoading  = false;
+
+  function escHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str == null ? "" : String(str);
+    return d.innerHTML;
+  }
+
+  function botTextHtml(text) {
+    return text.split("\n").filter(l => l.trim()).map(line => {
+      const parts = line.split(/(\*\*[^*]+\*\*)/g).map(part =>
+        part.startsWith("**") && part.endsWith("**")
+          ? "<strong>" + escHtml(part.slice(2,-2)) + "</strong>"
+          : escHtml(part)
+      ).join("");
+      return "<p>" + parts + "</p>";
+    }).join("");
+  }
+
+  function extractScore(text) {
+    const m = text.match(/score[:\s]+(\d+)/i) || text.match(/(\d+)\s*\/\s*10/);
+    return m ? Math.min(10, parseInt(m[1])) : null;
+  }
+
+  function renderChips() {
+    if (chatStarted) { chipsRow.innerHTML = ""; return; }
+    chipsRow.innerHTML = CHIPS.map(c =>
+      `<button class="chip">${escHtml(c)}</button>`
+    ).join("");
+    chipsRow.querySelectorAll(".chip").forEach((btn, i) => {
+      btn.addEventListener("click", () => sendChat(CHIPS[i]));
+    });
+  }
+
+  function renderMsgs() {
+    if (!chatStarted) {
+      const resourceTags = [
+        ...projects.map(p => p.name || ""),
+        ...skills.slice(0,7)
+      ].filter(Boolean);
+      chatMsgs.innerHTML = `
+        <div class="welcome-sc">
+          <div class="wb-av">\uD83E\uDD16</div>
+          <div class="wb-title">${user.name ? "Ready for you, " + escHtml(user.name.split(" ")[0]) + "!" : "Your AI Interview Coach"}</div>
+          <div class="wb-sub">I know your full profile. Say "start interview" to begin a mock session, or ask me anything about interview prep.</div>
+          ${resourceTags.length ? `
+          <div class="wb-res">
+            <div class="wb-lbl">Loaded from your profile</div>
+            <div class="wb-tags">${resourceTags.map(t => `<span class="wb-tag">${escHtml(t)}</span>`).join("")}</div>
+          </div>` : ""}
+        </div>`;
+      return;
+    }
+
+    chatMsgs.innerHTML = msgs.map(m => `
+      <div class="cmsg ${m.role === "user" ? "user" : ""}">
+        <div class="cav ${m.role === "user" ? "user" : "bot"}">
+          ${m.role === "user" ? (photoUrl ? `<img src="${photoUrl}" alt="" />` : "\uD83D\uDC64") : "\uD83E\uDD16"}
+        </div>
+        <div class="bubble ${m.role === "user" ? "user" : "bot"}">
+          ${m.role === "assistant" ? botTextHtml(m.text) : escHtml(m.text)}
+        </div>
+      </div>
+    `).join("") + (chatLoading ? `
+      <div class="cmsg">
+        <div class="cav bot">\uD83E\uDD16</div>
+        <div class="typing-b">
+          <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
+        </div>
+      </div>` : "");
+    chatMsgs.scrollTop = chatMsgs.scrollHeight;
+  }
+
+  function updateSaveBtn() {
+    savBtn.style.display = sessionScores.length > 0 ? "inline-flex" : "none";
+    savBtn.textContent = "Save Session (" + sessionScores.length + "Q)";
+  }
+
+  async function sendChat(text) {
+    const msg = (text || chatInput.value).trim();
+    if (!msg || chatLoading) return;
+    chatInput.value = "";
+    chatInput.style.height = "auto";
+    sendBtn.disabled = true;
+    chatStarted = true;
+    msgs.push({ role: "user", text: msg });
+    histRef.push({ role: "user", content: msg });
+    renderChips();
+    chatLoading = true;
+    renderMsgs();
+
+    try {
+      const res = await api.post("/chat", { messages: histRef });
+      const reply = res.reply;
+      histRef.push({ role: "assistant", content: reply });
+      msgs.push({ role: "assistant", text: reply });
+
+      const score = extractScore(reply);
+      if (score !== null) {
+        sessionScores.push(score);
+        const catMatch = reply.match(/\[(Technical|Project|Behavioral|HR)\]/i);
+        if (catMatch) {
+          const cat = catMatch[1];
+          if (!sessionCats[cat]) sessionCats[cat] = [];
+          sessionCats[cat].push(score);
+        }
+        updateSaveBtn();
+      }
+    } catch (err) {
+      const data = err.data;
+      const serverMsg = data && data.message;
+      const detail    = data && data.detail;
+      const friendly  = serverMsg
+        ? serverMsg + (detail ? "\n\nDetails: " + detail : "")
+        : err.status === 401
+          ? "Your session expired. Please log in again."
+          : "Something went wrong connecting to the server. Please try again.";
+      msgs.push({ role: "assistant", text: friendly });
+      histRef.pop();
+    }
+
+    chatLoading = false;
+    renderMsgs();
+    if (chatInput.value === "") sendBtn.disabled = true;
+  }
+
+  sendBtn.addEventListener("click", () => sendChat());
+  chatInput.addEventListener("input", () => {
+    sendBtn.disabled = !chatInput.value.trim();
+    chatInput.style.height = "auto";
+    chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + "px";
+  });
+  chatInput.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+
+  savBtn.addEventListener("click", async () => {
+    if (!sessionScores.length) return;
+    const avg = Math.round(sessionScores.reduce((a,b) => a+b, 0) / sessionScores.length);
+    const catAvgs = {};
+    Object.entries(sessionCats).forEach(([cat, scores]) => {
+      if (scores.length) catAvgs[cat] = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+    });
+    try {
+      await api.post("/analytics", { avgScore: avg, totalQs: sessionScores.length, categories: catAvgs });
+      showToast("Session saved! Avg score: " + avg + "/10");
+      sessionScores = [];
+      sessionCats = { Technical:[], Project:[], Behavioral:[], HR:[] };
+      updateSaveBtn();
+    } catch (err) {
+      showToast((err.data && err.data.message) || "Couldn't save session.", "error");
+    }
+  });
+
+  // Voice input (Chrome/Edge only)
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null, isRecording = false, voiceTranscript = "";
+  if (SR) {
+    document.getElementById("voiceBar").style.display = "flex";
+    recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-IN";
+
+    recognition.onresult = e => {
+      let final = "", interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (final) { voiceTranscript += final; chatInput.value += final; }
+      else document.getElementById("voiceStatus").textContent = interim || "Listening...";
+      updateVoiceUI();
+    };
+    recognition.onerror = recognition.onend = () => { isRecording = false; updateVoiceUI(); };
+
+    document.getElementById("micBtn").addEventListener("click", () => {
+      if (isRecording) { recognition.stop(); isRecording = false; }
+      else { voiceTranscript = ""; recognition.start(); isRecording = true; }
+      updateVoiceUI();
+    });
+    document.getElementById("voiceSendBtn").addEventListener("click", () => {
+      sendChat(chatInput.value || voiceTranscript);
+      voiceTranscript = "";
+      chatInput.value = "";
+      updateVoiceUI();
+    });
+  }
+
+  function updateVoiceUI() {
+    const micBtn  = document.getElementById("micBtn");
+    const statusEl = document.getElementById("voiceStatus");
+    const sendVBtn = document.getElementById("voiceSendBtn");
+    micBtn.className = "mic-btn " + (isRecording ? "recording" : "idle");
+    micBtn.textContent = isRecording ? "⏹" : "🎙️";
+    if (isRecording) {
+      statusEl.className = "voice-status recording";
+      statusEl.textContent = "🔴 Listening... speak your answer";
+      sendVBtn.style.display = "none";
+    } else if (voiceTranscript) {
+      statusEl.className = "voice-transcript";
+      statusEl.textContent = voiceTranscript;
+      sendVBtn.style.display = "inline-flex";
+    } else {
+      statusEl.className = "voice-status";
+      statusEl.textContent = "Press 🎙️ to speak your answer — like a real interview";
+      sendVBtn.style.display = "none";
+    }
+  }
+
+  renderChips();
+  renderMsgs();
+})();
+</script>
+{% endblock %}

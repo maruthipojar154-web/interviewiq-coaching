@@ -1,0 +1,136 @@
+{% extends "_base.html" %}
+{% block title %}My Profile — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("profile");
+  if (!ctx) return;
+  const { user, profile } = ctx;
+  let skillList = (profile && profile.skills) || [];
+
+  const html = `
+    <div class="page-hdr"><div class="page-title">My Profile</div><div class="page-sub">This info personalizes your interview questions</div></div>
+    <div class="divider"></div>
+    <div class="content">
+      <div class="section-lbl">Photo</div>
+      <div class="card" style="display:flex;align-items:center;gap:16px">
+        <label class="photo-up" id="photoUp">
+          <div id="photoPreview">${profile && profile.photo_path
+            ? `<img src="${profile.photo_path}" alt="" />`
+            : `<div class="photo-placeholder"><span style="font-size:22px">👤</span>Add photo</div>`}</div>
+          <div class="photo-overlay" id="photoOverlay">✏️</div>
+          <input type="file" id="photoInput" accept="image/*" style="display:none" />
+        </label>
+        <div style="font-size:12px;color:#6B7294">Square images look best. JPG or PNG, up to 5MB.</div>
+      </div>
+
+      <div class="section-lbl">Personal Info</div>
+      <div class="card">
+        <div class="grid2">
+          <div class="field"><label class="field-lbl">Full Name</label><input class="fi" value="${escapeHtml(user.name || "")}" disabled /></div>
+          <div class="field"><label class="field-lbl">Target Role</label><input class="fi" id="role" placeholder="e.g. Python Full-Stack Developer" value="${escapeHtml(profile && profile.role || "")}" /></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label class="field-lbl">Email</label><input class="fi" value="${escapeHtml(user.email || "")}" disabled /></div>
+          <div class="field"><label class="field-lbl">Phone</label><input class="fi" id="phone" placeholder="+91 98765 43210" value="${escapeHtml(profile && profile.phone || "")}" /></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label class="field-lbl">Location</label><input class="fi" id="location" placeholder="Bengaluru, Karnataka" value="${escapeHtml(profile && profile.location || "")}" /></div>
+          <div class="field"><label class="field-lbl">LinkedIn</label><input class="fi" id="linkedin" placeholder="linkedin.com/in/yourname" value="${escapeHtml(profile && profile.linkedin || "")}" /></div>
+        </div>
+        <div class="field"><label class="field-lbl">GitHub</label><input class="fi" id="github" placeholder="github.com/yourusername" value="${escapeHtml(profile && profile.github || "")}" /></div>
+        <div class="field"><label class="field-lbl">Professional Summary</label><textarea class="fi" id="summary" rows="3" placeholder="2-3 sentences about yourself. The AI uses this to personalize interview questions.">${escapeHtml(profile && profile.summary || "")}</textarea></div>
+      </div>
+
+      <div class="section-lbl">Skills</div>
+      <div class="card">
+        <div class="tags-wrap" id="skillsWrap"></div>
+        <div style="font-size:11px;color:#454B6A;margin-top:9px">Press Enter to add · Click × to remove</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-p" id="saveBtn">Save Profile</button>
+        <button class="btn btn-g" onclick="window.location.href='/dashboard'">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("pageContent").innerHTML = html;
+
+  function renderSkills() {
+    const wrap = document.getElementById("skillsWrap");
+    wrap.innerHTML = skillList.map((s) => `
+      <span class="skill-tag">${escapeHtml(s)}<span class="stag-rm" data-skill="${escapeHtml(s)}">×</span></span>
+    `).join("") + `<input class="tag-inp" id="skillInp" placeholder="+ Add skill" />`;
+
+    wrap.querySelectorAll(".stag-rm").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        skillList = skillList.filter((s) => s !== btn.dataset.skill);
+        renderSkills();
+      });
+    });
+    const skillInp = document.getElementById("skillInp");
+    skillInp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && skillInp.value.trim()) {
+        e.preventDefault();
+        const v = skillInp.value.trim();
+        if (!skillList.includes(v)) skillList.push(v);
+        renderSkills();
+        document.getElementById("skillInp").focus();
+      }
+    });
+  }
+  renderSkills();
+
+  // Photo upload
+  const photoInput = document.getElementById("photoInput");
+  document.getElementById("photoUp").addEventListener("click", (e) => {
+    if (e.target.tagName !== "INPUT") photoInput.click();
+  });
+  photoInput.addEventListener("change", async () => {
+    const file = photoInput.files[0];
+    if (!file) return;
+    document.getElementById("photoOverlay").textContent = "...";
+    try {
+      const fd = new FormData();
+      fd.append("photo", file);
+      const res = await api.post("/profile/photo", fd, { isFormData: true });
+      document.getElementById("photoPreview").innerHTML = `<img src="${res.photo_path}" alt="" />`;
+      showToast("Photo updated!");
+    } catch (err) {
+      showToast((err.data && err.data.message) || "Couldn't upload photo.", "error");
+    } finally {
+      document.getElementById("photoOverlay").textContent = "✏️";
+    }
+  });
+
+  // Save profile
+  document.getElementById("saveBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("saveBtn");
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    try {
+      await api.put("/profile", {
+        role: document.getElementById("role").value,
+        phone: document.getElementById("phone").value,
+        location: document.getElementById("location").value,
+        linkedin: document.getElementById("linkedin").value,
+        github: document.getElementById("github").value,
+        summary: document.getElementById("summary").value,
+        skills: skillList,
+      });
+      showToast("Profile saved!");
+      window.location.href = "/dashboard";
+    } catch (err) {
+      showToast((err.data && err.data.message) || "Couldn't save profile.", "error");
+      btn.disabled = false;
+      btn.textContent = "Save Profile";
+    }
+  });
+})();
+</script>
+{% endblock %}

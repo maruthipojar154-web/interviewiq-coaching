@@ -1,0 +1,127 @@
+{% extends "_base.html" %}
+{% block title %}Verify email — InterviewIQ{% endblock %}
+{% block body %}
+<div class="auth-screen">
+  <div class="auth-card">
+    <button onclick="history.back()" style="background:none;border:none;cursor:pointer;color:#6B7294;font-size:13px;display:flex;align-items:center;gap:5px;margin-bottom:16px;padding:0;">← Back</button>
+    <div class="auth-logo">
+      <div class="sb-logo-icon">🎯</div>
+      <div class="auth-logo-name">Interview<span class="sb-logo-sub">IQ</span></div>
+    </div>
+    <div class="auth-title">Verify your email</div>
+    <div class="auth-sub">We sent a 6-digit code to <strong id="emailDisplay" style="color:#E2E4EF"></strong>. Enter it below to activate your account.</div>
+
+    <div id="errorBox"></div>
+    <div id="successBox"></div>
+
+    <form class="auth-form" id="otpForm">
+      <div class="otp-inputs" id="otpInputs">
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+        <input class="otp-box" inputmode="numeric" maxlength="1" />
+      </div>
+      <button class="btn btn-p btn-block" type="submit" id="submitBtn">Verify & continue</button>
+    </form>
+
+    <div class="otp-resend">
+      Didn't get the code? <span class="auth-link" id="resendLink">Resend code</span>
+    </div>
+
+    <div class="auth-footer">
+      <a href="/login" class="auth-link">Back to log in</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const email = params.get("email") || "";
+  if (!email) window.location.href = "/register";
+  document.getElementById("emailDisplay").textContent = email;
+
+  const boxes = Array.from(document.querySelectorAll(".otp-box"));
+  boxes.forEach((box, i) => {
+    box.addEventListener("input", () => {
+      box.value = box.value.replace(/\D/g, "").slice(0, 1);
+      if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !box.value && i > 0) boxes[i - 1].focus();
+    });
+  });
+  document.getElementById("otpInputs").addEventListener("paste", (e) => {
+    const pasted = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+    e.preventDefault();
+    pasted.split("").forEach((d, i) => { if (boxes[i]) boxes[i].value = d; });
+    boxes[Math.min(pasted.length, 5)].focus();
+  });
+
+  const form = document.getElementById("otpForm");
+  const errorBox = document.getElementById("errorBox");
+  const successBox = document.getElementById("successBox");
+  const submitBtn = document.getElementById("submitBtn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorBox.innerHTML = ""; successBox.innerHTML = "";
+    const code = boxes.map((b) => b.value).join("");
+    if (code.length !== 6) {
+      errorBox.innerHTML = `<div class="auth-error">Please enter all 6 digits.</div>`;
+      return;
+    }
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner"></span>';
+
+    try {
+      const res = await api.post("/auth/verify-otp", { email, code });
+      Auth.login(res.token, res.user);
+      window.location.href = "/dashboard";
+    } catch (err) {
+      errorBox.innerHTML = `<div class="auth-error">${(err.data && err.data.message) || "Verification failed. Please try again."}</div>`;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Verify & continue";
+    }
+  });
+
+  let cooldown = 0;
+  let cooldownTimer = null;
+  const resendLink = document.getElementById("resendLink");
+
+  function tickCooldown() {
+    if (cooldown <= 0) {
+      resendLink.textContent = "Resend code";
+      resendLink.style.cursor = "pointer";
+      resendLink.onclick = handleResend;
+      clearInterval(cooldownTimer);
+      return;
+    }
+    resendLink.textContent = `Resend in ${cooldown}s`;
+    resendLink.style.color = "#454B6A";
+    resendLink.onclick = null;
+    cooldown--;
+  }
+
+  async function handleResend() {
+    errorBox.innerHTML = ""; successBox.innerHTML = "";
+    resendLink.onclick = null;
+    try {
+      await api.post("/auth/resend-otp", { email });
+      successBox.innerHTML = `<div class="auth-success">A new code has been sent to your email.</div>`;
+      cooldown = 30;
+      resendLink.style.color = "#818CF8";
+      cooldownTimer = setInterval(tickCooldown, 1000);
+      tickCooldown();
+    } catch (err) {
+      errorBox.innerHTML = `<div class="auth-error">${(err.data && err.data.message) || "Couldn't resend the code. Try again shortly."}</div>`;
+      resendLink.onclick = handleResend;
+    }
+  }
+  resendLink.onclick = handleResend;
+</script>
+{% endblock %}

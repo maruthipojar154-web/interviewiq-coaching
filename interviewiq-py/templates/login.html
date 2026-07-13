@@ -1,0 +1,86 @@
+{% extends "_base.html" %}
+{% block title %}Log in — InterviewIQ{% endblock %}
+{% block body %}
+<div class="auth-screen">
+  <div class="auth-card">
+    <button onclick="history.back()" style="background:none;border:none;cursor:pointer;color:#6B7294;font-size:13px;display:flex;align-items:center;gap:5px;margin-bottom:16px;padding:0;">
+      ← Back
+    </button>
+    <div class="auth-logo">
+      <div class="sb-logo-icon">🎯</div>
+      <div class="auth-logo-name">Interview<span class="sb-logo-sub">IQ</span></div>
+    </div>
+    <div class="auth-title">Welcome back</div>
+    <div class="auth-sub">Log in to keep prepping with your AI interview coach.</div>
+
+    <div id="errorBox"></div>
+
+    <form class="auth-form" id="loginForm">
+      <div class="field">
+        <label class="field-lbl">Email</label>
+        <input class="fi" type="email" id="email" placeholder="you@gmail.com" required />
+      </div>
+      <div class="field">
+        <div class="pw-row">
+          <label class="field-lbl" style="margin-bottom:0">Password</label>
+          <a href="/forgot-password" class="pw-forgot">Forgot password?</a>
+        </div>
+        <div style="position:relative">
+          <input class="fi" type="password" id="password" placeholder="Your password" required style="padding-right:42px" />
+          <button type="button" id="togglePw" style="position:absolute;right:11px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#6B7294;font-size:16px;padding:0;line-height:1;">👁</button>
+        </div>
+      </div>
+      <button class="btn btn-p btn-block" type="submit" id="submitBtn">Log in</button>
+    </form>
+
+    <div class="auth-footer">
+      Don't have an account? <a href="/register" class="auth-link">Sign up</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  Auth.redirectIfLoggedIn();
+
+  // Password toggle
+  const pwInput = document.getElementById("password");
+  const toggleBtn = document.getElementById("togglePw");
+  let pwVisible = false;
+  toggleBtn.addEventListener("click", () => {
+    pwVisible = !pwVisible;
+    pwInput.type = pwVisible ? "text" : "password";
+    toggleBtn.textContent = pwVisible ? "🙈" : "👁";
+  });
+
+  const form = document.getElementById("loginForm");
+  const errorBox = document.getElementById("errorBox");
+  const submitBtn = document.getElementById("submitBtn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorBox.innerHTML = "";
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner"></span>';
+
+    const email = document.getElementById("email").value.trim();
+    const password = pwInput.value;
+
+    try {
+      const res = await api.post("/auth/login", { email, password });
+      Auth.login(res.token, res.user);
+      window.location.href = "/dashboard";
+    } catch (err) {
+      const data = err.data;
+      if (data && data.needsVerification) {
+        window.location.href = `/verify-otp?email=${encodeURIComponent(data.email)}`;
+        return;
+      }
+      errorBox.innerHTML = `<div class="auth-error">${(data && data.message) || "Something went wrong. Please try again."}</div>`;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Log in";
+    }
+  });
+</script>
+{% endblock %}

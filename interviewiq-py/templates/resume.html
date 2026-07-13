@@ -1,0 +1,104 @@
+{% extends "_base.html" %}
+{% block title %}Resume & Documents — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("resume");
+  if (!ctx) return;
+  const { profile } = ctx;
+  const hasResume = Boolean(profile && (profile.resume_text || profile.resume_path));
+
+  const html = `
+    <div class="page-hdr"><div class="page-title">Resume & Documents</div><div class="page-sub">Upload your resume — AI reads it for hyper-relevant questions</div></div>
+    <div class="divider"></div>
+    <div class="content">
+      <div class="section-lbl">Resume</div>
+      <div class="upload-zone ${hasResume ? "filled" : ""}" id="resumeZone">
+        <input type="file" id="resumeInput" accept=".pdf,.doc,.docx,.txt" style="display:none" />
+        <div class="uz-icon" id="resumeIcon">${hasResume ? "✅" : "📄"}</div>
+        <div class="uz-title" id="resumeTitle">${hasResume ? "Resume Uploaded" : "Upload Your Resume"}</div>
+        <div class="uz-sub">PDF, DOCX, or TXT · Drag & drop or click</div>
+      </div>
+
+      <div id="resumeStatusCard">
+        ${hasResume ? `
+        <div class="card" style="margin-top:14px;border-color:rgba(52,211,153,.2)">
+          <div style="font-size:13px;font-weight:600;color:#34D399;margin-bottom:7px">✅ Resume saved to your account</div>
+          <div style="font-size:12px;color:#6B7294;line-height:1.7">
+            The AI will ask questions based on your resume. Go to <strong style="color:#E2E4EF">Chat with AI</strong> and say <strong style="color:#818CF8">"Start interview"</strong>.
+          </div>
+        </div>` : ""}
+      </div>
+
+      <div class="section-lbl" style="margin-top:22px">Certifications</div>
+      <div class="upload-zone" id="certZone">
+        <input type="file" id="certInput" accept=".pdf,.jpg,.png" style="display:none" />
+        <div class="uz-icon" id="certIcon">📜</div>
+        <div class="uz-title" id="certTitle">Upload Certificates</div>
+        <div class="uz-sub">PDF or Image</div>
+        <div class="uz-file" id="certFileName" style="display:none"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById("pageContent").innerHTML = html;
+
+  const resumeZone = document.getElementById("resumeZone");
+  const resumeInput = document.getElementById("resumeInput");
+  resumeZone.addEventListener("click", () => resumeInput.click());
+  resumeZone.addEventListener("dragover", (e) => { e.preventDefault(); resumeZone.classList.add("drag"); });
+  resumeZone.addEventListener("dragleave", () => resumeZone.classList.remove("drag"));
+  resumeZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    resumeZone.classList.remove("drag");
+    if (e.dataTransfer.files[0]) handleResumeUpload(e.dataTransfer.files[0]);
+  });
+  resumeInput.addEventListener("change", () => {
+    if (resumeInput.files[0]) handleResumeUpload(resumeInput.files[0]);
+  });
+
+  async function handleResumeUpload(file) {
+    document.getElementById("resumeIcon").textContent = "⏳";
+    document.getElementById("resumeTitle").textContent = "Uploading...";
+    try {
+      const fd = new FormData();
+      fd.append("resume", file);
+      await api.post("/profile/resume", fd, { isFormData: true });
+      document.getElementById("resumeIcon").textContent = "✅";
+      document.getElementById("resumeTitle").textContent = "Resume Uploaded";
+      resumeZone.classList.add("filled");
+      document.getElementById("resumeStatusCard").innerHTML = `
+        <div class="card" style="margin-top:14px;border-color:rgba(52,211,153,.2)">
+          <div style="font-size:13px;font-weight:600;color:#34D399;margin-bottom:7px">✅ Resume saved to your account</div>
+          <div style="font-size:12px;color:#6B7294;line-height:1.7">
+            The AI will ask questions based on your resume. Go to <strong style="color:#E2E4EF">Chat with AI</strong> and say <strong style="color:#818CF8">"Start interview"</strong>.
+          </div>
+        </div>`;
+      showToast("Resume uploaded & saved!");
+    } catch (err) {
+      document.getElementById("resumeIcon").textContent = "📄";
+      document.getElementById("resumeTitle").textContent = "Upload Your Resume";
+      showToast((err.data && err.data.message) || "Couldn't upload resume.", "error");
+    }
+  }
+
+  const certZone = document.getElementById("certZone");
+  const certInput = document.getElementById("certInput");
+  certZone.addEventListener("click", () => certInput.click());
+  certInput.addEventListener("change", () => {
+    const file = certInput.files[0];
+    if (!file) return;
+    document.getElementById("certIcon").textContent = "🏅";
+    document.getElementById("certTitle").textContent = "Certificate Selected";
+    certZone.classList.add("filled");
+    const fnEl = document.getElementById("certFileName");
+    fnEl.style.display = "block";
+    fnEl.textContent = file.name;
+  });
+})();
+</script>
+{% endblock %}

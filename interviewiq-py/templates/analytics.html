@@ -1,0 +1,100 @@
+{% extends "_base.html" %}
+{% block title %}Analytics — InterviewIQ{% endblock %}
+{% block body %}
+<div class="app" id="appRoot"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+<script>
+(async () => {
+  const ctx = await renderAppShell("analytics");
+  if (!ctx) return;
+
+  let sessions = [];
+  try {
+    const res = await api.get("/analytics");
+    sessions = res.sessions;
+  } catch (e) {
+    console.error("Failed to load sessions:", e);
+  }
+
+  const html = `
+    <div class="page-hdr"><div class="page-title">Analytics</div><div class="page-sub">Track your interview prep progress over time</div></div>
+    <div class="divider"></div>
+    <div class="content" id="analyticsContent"></div>
+  `;
+  document.getElementById("pageContent").innerHTML = html;
+  const content = document.getElementById("analyticsContent");
+
+  if (sessions.length === 0) {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No sessions yet. Complete a mock interview to see your stats here.</div></div>`;
+    return;
+  }
+
+  const avg = Math.round(sessions.reduce((a, b) => a + b.avg_score, 0) / sessions.length);
+  const best = Math.max(...sessions.map((s) => s.avg_score));
+  const totalQs = sessions.reduce((a, b) => a + b.total_qs, 0);
+
+  const scoreColor = (s) => (s >= 7 ? "#34D399" : s >= 5 ? "#FBBF24" : "#F87171");
+
+  const barsHtml = sessions.slice(-10).map((s, i) => `
+    <div class="bar-col">
+      <div class="bar-val">${s.avg_score}</div>
+      <div class="bar" style="height:${s.avg_score * 10}px;background:${scoreColor(s.avg_score)}"></div>
+      <div class="bar-lbl">#${i + 1}</div>
+    </div>
+  `).join("");
+
+  const sessionRowsHtml = sessions.slice().reverse().slice(0, 10).map((s) => `
+    <div class="session-row">
+      <div class="session-date">${new Date(s.created_at).toLocaleDateString()}</div>
+      <div class="session-bar"><div class="session-fill" style="width:${s.avg_score * 10}%;background:${scoreColor(s.avg_score)}"></div></div>
+      <div class="session-score" style="color:${scoreColor(s.avg_score)}">${s.avg_score}/10</div>
+    </div>
+  `).join("");
+
+  // Aggregate categories across all sessions
+  const catTotals = {};
+  sessions.forEach((s) => {
+    Object.entries(s.categories || {}).forEach(([cat, score]) => {
+      if (!catTotals[cat]) catTotals[cat] = [];
+      catTotals[cat].push(score);
+    });
+  });
+  const catHtml = Object.entries(catTotals).map(([cat, scores]) => {
+    const catAvg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    return `
+      <div class="cat-item">
+        <div class="cat-name">${cat}</div>
+        <div class="cat-bar"><div class="cat-fill" style="width:${catAvg * 10}%;background:${scoreColor(catAvg)}"></div></div>
+        <div class="cat-score">${catAvg}/10 avg</div>
+      </div>`;
+  }).join("");
+
+  content.innerHTML = `
+    <div class="analytics-grid">
+      <div class="an-stat"><div class="an-val" style="color:#6366F1">${sessions.length}</div><div class="an-key">Sessions</div></div>
+      <div class="an-stat"><div class="an-val" style="color:${scoreColor(avg)}">${avg}/10</div><div class="an-key">Avg Score</div></div>
+      <div class="an-stat"><div class="an-val" style="color:#34D399">${best}/10</div><div class="an-key">Best Score</div></div>
+    </div>
+
+    <div class="chart-wrap">
+      <div class="chart-title">Recent Sessions (last 10)</div>
+      <div class="bar-chart">${barsHtml}</div>
+    </div>
+
+    ${catHtml ? `
+    <div class="chart-wrap">
+      <div class="chart-title">By Category</div>
+      <div class="cat-breakdown">${catHtml}</div>
+    </div>` : ""}
+
+    <div class="chart-wrap">
+      <div class="chart-title">Session History</div>
+      ${sessionRowsHtml}
+    </div>
+  `;
+})();
+</script>
+{% endblock %}
